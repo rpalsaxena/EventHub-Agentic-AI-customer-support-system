@@ -111,14 +111,20 @@ def search_knowledge_base(query: str, top_k: int = 3) -> List[Dict[str, str]]:
     if results and results['documents'] and len(results['documents'][0]) > 0:
         for i in range(len(results['documents'][0])):
             metadata = results['metadatas'][0][i] if results['metadatas'] else {}
-            distance = results['distances'][0][i] if results['distances'] else 0.0
+            distance = results['distances'][0][i] if results['distances'] else 1.0
+            
+            # Convert cosine distance to similarity score
+            # ChromaDB cosine distance ranges from 0 (identical) to 2 (opposite)
+            # Convert to similarity: 1 - (distance / 2) gives range 0-1
+            relevance = max(0.0, min(1.0, 1.0 - (distance / 2.0)))
             
             articles.append({
                 "title": metadata.get("title", "Unknown"),
                 "content": results['documents'][0][i],
                 "category": metadata.get("category", "General"),
                 "article_id": metadata.get("article_id", ""),
-                "relevance_score": round(1 - distance, 3),  # Convert distance to similarity
+                "relevance": round(relevance, 3),       # Primary key
+                "relevance_score": round(relevance, 3), # Alias for compatibility
             })
     
     return articles
@@ -143,7 +149,8 @@ def search_knowledge_base_raw(query: str, top_k: int = 3) -> str:
     formatted = "📚 Knowledge Base Articles:\n\n"
     for idx, article in enumerate(results, 1):
         formatted += f"**Article {idx}: {article['title']}** (Category: {article['category']})\n"
-        formatted += f"Relevance: {article['relevance_score']:.1%}\n"
+        relevance = article.get('relevance', article.get('relevance_score', 0))
+        formatted += f"Relevance: {relevance:.1%}\n"
         formatted += f"{article['content']}\n\n"
         formatted += "-" * 80 + "\n\n"
     

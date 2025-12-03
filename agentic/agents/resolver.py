@@ -242,7 +242,11 @@ class TicketResolver:
         if category == "complaint":
             return True, "Complaints require human review for customer satisfaction"
         
-        # Rule 2: Low KB confidence (<50% relevance)
+        # Rule 2: Negative sentiment with high urgency (angry customers need human touch)
+        if sentiment == "negative" and urgency in ["high", "critical"]:
+            return True, f"Negative sentiment with {urgency} urgency requires human attention"
+        
+        # Rule 3: Low KB confidence (<50% relevance)
         if rag_confidence < 0.5:
             return True, f"Low knowledge base confidence ({rag_confidence:.1%})"
         
