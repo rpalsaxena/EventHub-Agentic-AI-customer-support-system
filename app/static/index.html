@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EventHub AI Support</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .typing-indicator span {
+            animation: blink 1.4s infinite both;
+        }
+        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes blink {
+            0%, 60%, 100% { opacity: 0.3; }
+            30% { opacity: 1; }
+        }
+        .chat-container {
+            height: calc(100vh - 220px);
+        }
+        .message-content {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100">
+    <div class="flex flex-col h-screen max-w-4xl mx-auto">
+        <!-- Header -->
+        <header class="bg-gray-800 p-4 shadow-lg">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold text-white">EventHub Support</h1>
+                        <p class="text-xs text-gray-400">AI-Powered Assistance</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <a href="/dashboard" class="text-blue-400 hover:text-blue-300 text-sm">📊 Dashboard</a>
+                    <button onclick="clearChat()" class="text-gray-400 hover:text-white text-sm">Clear Chat</button>
+                </div>
+            </div>
+            
+            <!-- User Context Banner -->
+            <div id="userBanner" class="hidden mt-3 bg-blue-900/50 border border-blue-700 rounded-lg p-3 flex items-center justify-between">
+                <div class="flex items-center space-x-2">
+                    <span class="text-blue-300">👤</span>
+                    <span class="text-white font-medium" id="bannerUserEmail"></span>
+                    <span class="text-xs text-gray-400" id="bannerUserInfo"></span>
+                </div>
+                <button onclick="clearUserContext()" class="text-gray-400 hover:text-white text-xs">✕ Clear</button>
+            </div>
+        </header>
+
+        <!-- Chat Messages -->
+        <div id="chatContainer" class="chat-container overflow-y-auto p-4 space-y-4">
+            <!-- Welcome Message -->
+            <div class="flex justify-start">
+                <div class="bg-gray-700 rounded-2xl rounded-bl-md px-4 py-3 max-w-[80%]">
+                    <p class="text-gray-100">👋 Hello! I'm your EventHub AI assistant. How can I help you today?</p>
+                    <p class="text-gray-400 text-xs mt-2">I can help with reservations, refunds, event information, account issues, and more.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Input Area -->
+        <div class="bg-gray-800 p-4 border-t border-gray-700">
+            <!-- Manual User Input (when no user selected) -->
+            <div id="manualUserInput" class="mb-3 grid grid-cols-2 gap-3">
+                <div>
+                    <label class="text-xs text-gray-400 block mb-1">User Email (optional)</label>
+                    <input 
+                        type="email" 
+                        id="emailInput"
+                        class="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="user@email.com"
+                    >
+                </div>
+                <div>
+                    <label class="text-xs text-gray-400 block mb-1">Reservation ID (optional)</label>
+                    <input 
+                        type="text" 
+                        id="reservationInput"
+                        class="w-full bg-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="RES001"
+                    >
+                </div>
+            </div>
+            
+            <form id="chatForm" class="flex space-x-3">
+                <div class="flex-1 relative">
+                    <textarea 
+                        id="messageInput" 
+                        rows="1"
+                        class="w-full bg-gray-700 text-white rounded-xl px-4 py-3 pr-12 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="Type your message..."
+                        onkeydown="handleKeyDown(event)"
+                    ></textarea>
+                </div>
+                <button 
+                    type="submit" 
+                    id="sendBtn"
+                    class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    Send
+                </button>
+            </form>
+            <p class="text-xs text-gray-500 mt-2 text-center">
+                💡 Tip: <a href="/dashboard" class="text-blue-400 hover:underline">Open Dashboard</a> to select a user and see their reservations/tickets
+            </p>
+        </div>
+    </div>
+
+    <script>
+        const chatContainer = document.getElementById('chatContainer');
+        const chatForm = document.getElementById('chatForm');
+        const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const emailInput = document.getElementById('emailInput');
+        const reservationInput = document.getElementById('reservationInput');
+        
+        let isProcessing = false;
+        let currentUserEmail = null;
+
+        // Initialize - check for user context from URL or sessionStorage
+        function initUserContext() {
+            // Check URL params first
+            const urlParams = new URLSearchParams(window.location.search);
+            const userFromUrl = urlParams.get('user');
+            
+            // Check sessionStorage
+            const userFromSession = sessionStorage.getItem('chatUserEmail');
+            
+            const email = userFromUrl || userFromSession;
+            
+            if (email) {
+                setUserContext(email);
+            }
+        }
+
+        // Set user context
+        async function setUserContext(email) {
+            currentUserEmail = email;
+            emailInput.value = email;
+            
+            // Show banner
+            document.getElementById('userBanner').classList.remove('hidden');
+            document.getElementById('bannerUserEmail').textContent = email;
+            
+            // Hide manual input
+            document.getElementById('manualUserInput').classList.add('hidden');
+            
+            // Fetch user details for banner
+            try {
+                const response = await fetch(`/api/users/${encodeURIComponent(email)}/details`);
+                const data = await response.json();
+                
+                if (data.user) {
+                    const info = [];
+                    if (data.user.name) info.push(data.user.name);
+                    if (data.user.membership_tier) info.push(data.user.membership_tier);
+                    info.push(`${data.reservations.length} reservations`);
+                    info.push(`${data.tickets.length} tickets`);
+                    
+                    document.getElementById('bannerUserInfo').textContent = `(${info.join(' • ')})`;
+                }
+            } catch (e) {
+                console.error('Failed to fetch user details:', e);
+            }
+            
+            // Store in session
+            sessionStorage.setItem('chatUserEmail', email);
+            
+            // Update welcome message
+            addSystemMessage(`✅ Now chatting as <strong>${email}</strong>. Your account details will be used for personalized support.`);
+        }
+
+        // Clear user context
+        function clearUserContext() {
+            currentUserEmail = null;
+            emailInput.value = '';
+            reservationInput.value = '';
+            
+            document.getElementById('userBanner').classList.add('hidden');
+            document.getElementById('manualUserInput').classList.remove('hidden');
+            
+            sessionStorage.removeItem('chatUserEmail');
+            
+            // Clean URL
+            window.history.replaceState({}, '', '/');
+            
+            addSystemMessage('👤 User context cleared. You can now enter email/reservation manually or select a user from the Dashboard.');
+        }
+
+        // Add system message
+        function addSystemMessage(html) {
+            const div = document.createElement('div');
+            div.className = 'flex justify-center';
+            div.innerHTML = `
+                <div class="bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-2 text-sm text-gray-300">
+                    ${html}
+                </div>
+            `;
+            chatContainer.appendChild(div);
+            scrollToBottom();
+        }
+
+        // Auto-resize textarea
+        messageInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+        });
+
+        // Handle Enter key
+        function handleKeyDown(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                chatForm.dispatchEvent(new Event('submit'));
+            }
+        }
+
+        // Scroll to bottom
+        function scrollToBottom() {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        // Add user message to chat
+        function addUserMessage(text, email, resId) {
+            const div = document.createElement('div');
+            div.className = 'flex justify-end';
+            
+            let contextHtml = '';
+            if (email || resId) {
+                const parts = [];
+                if (email) parts.push(`📧 ${email}`);
+                if (resId) parts.push(`🎫 ${resId}`);
+                contextHtml = `<p class="text-blue-300 text-xs mt-1">${parts.join(' • ')}</p>`;
+            }
+            
+            div.innerHTML = `
+                <div class="bg-blue-600 rounded-2xl rounded-br-md px-4 py-3 max-w-[80%]">
+                    <p class="text-white message-content">${escapeHtml(text)}</p>
+                    ${contextHtml}
+                </div>
+            `;
+            chatContainer.appendChild(div);
+            scrollToBottom();
+        }
+
+        // Add AI message bubble (returns the content element for streaming)
+        function addAIMessage() {
+            const div = document.createElement('div');
+            div.className = 'flex justify-start';
+            div.innerHTML = `
+                <div class="bg-gray-700 rounded-2xl rounded-bl-md px-4 py-3 max-w-[80%]">
+                    <p class="text-gray-100 message-content ai-response"></p>
+                    <div class="metadata hidden mt-2 pt-2 border-t border-gray-600">
+                        <div class="flex flex-wrap gap-2 text-xs">
+                            <span class="status-badge px-2 py-1 rounded"></span>
+                            <span class="category-badge bg-gray-600 px-2 py-1 rounded"></span>
+                            <span class="urgency-badge px-2 py-1 rounded"></span>
+                            <span class="confidence-badge bg-gray-600 px-2 py-1 rounded"></span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            chatContainer.appendChild(div);
+            scrollToBottom();
+            return div.querySelector('.ai-response');
+        }
+
+        // Add typing indicator
+        function addTypingIndicator() {
+            const div = document.createElement('div');
+            div.className = 'flex justify-start typing-wrapper';
+            div.innerHTML = `
+                <div class="bg-gray-700 rounded-2xl rounded-bl-md px-4 py-3">
+                    <div class="typing-indicator flex space-x-1">
+                        <span class="w-2 h-2 bg-gray-400 rounded-full"></span>
+                        <span class="w-2 h-2 bg-gray-400 rounded-full"></span>
+                        <span class="w-2 h-2 bg-gray-400 rounded-full"></span>
+                    </div>
+                </div>
+            `;
+            chatContainer.appendChild(div);
+            scrollToBottom();
+        }
+
+        // Remove typing indicator
+        function removeTypingIndicator() {
+            const indicator = chatContainer.querySelector('.typing-wrapper');
+            if (indicator) indicator.remove();
+        }
+
+        // Escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Update metadata badges
+        function updateMetadata(messageDiv, data) {
+            const container = messageDiv.closest('.bg-gray-700');
+            const metadataDiv = container.querySelector('.metadata');
+            
+            // Status badge
+            const statusBadge = metadataDiv.querySelector('.status-badge');
+            if (data.status === 'resolved') {
+                statusBadge.textContent = '✓ Resolved';
+                statusBadge.className = 'status-badge px-2 py-1 rounded bg-green-600';
+            } else {
+                statusBadge.textContent = '⚡ Escalated';
+                statusBadge.className = 'status-badge px-2 py-1 rounded bg-orange-600';
+            }
+            
+            // Category badge
+            const categoryBadge = metadataDiv.querySelector('.category-badge');
+            categoryBadge.textContent = data.category;
+            
+            // Urgency badge
+            const urgencyBadge = metadataDiv.querySelector('.urgency-badge');
+            urgencyBadge.textContent = data.urgency;
+            const urgencyColors = {
+                'low': 'bg-green-700',
+                'medium': 'bg-yellow-700',
+                'high': 'bg-orange-700',
+                'critical': 'bg-red-700'
+            };
+            urgencyBadge.className = `urgency-badge px-2 py-1 rounded ${urgencyColors[data.urgency] || 'bg-gray-600'}`;
+            
+            // Confidence badge
+            const confidenceBadge = metadataDiv.querySelector('.confidence-badge');
+            const confPercent = Math.round(data.confidence * 100);
+            confidenceBadge.textContent = `${confPercent}% confidence`;
+            
+            metadataDiv.classList.remove('hidden');
+        }
+
+        // Handle form submission
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const message = messageInput.value.trim();
+            if (!message || isProcessing) return;
+            
+            isProcessing = true;
+            sendBtn.disabled = true;
+            
+            // Get user context
+            const email = currentUserEmail || emailInput.value.trim() || null;
+            const reservationId = reservationInput.value.trim() || null;
+            
+            // Add user message
+            addUserMessage(message, email, reservationId);
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
+            
+            // Add typing indicator
+            addTypingIndicator();
+            
+            try {
+                // Prepare request
+                const payload = {
+                    message: message,
+                    email: email,
+                    reservation_id: reservationId
+                };
+                
+                // Create AI message bubble
+                removeTypingIndicator();
+                const responseEl = addAIMessage();
+                
+                // Stream the response
+                const response = await fetch('/chat/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!response.ok) throw new Error('Request failed');
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let metadata = null;
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+                                
+                                if (data.type === 'metadata') {
+                                    metadata = data;
+                                } else if (data.type === 'content') {
+                                    responseEl.textContent += data.content;
+                                    scrollToBottom();
+                                } else if (data.type === 'done' && metadata) {
+                                    updateMetadata(responseEl, metadata);
+                                }
+                            } catch (e) {
+                                // Ignore parse errors
+                            }
+                        }
+                    }
+                }
+                
+            } catch (error) {
+                console.error('Error:', error);
+                removeTypingIndicator();
+                const responseEl = addAIMessage();
+                responseEl.textContent = 'Sorry, something went wrong. Please try again.';
+                responseEl.classList.add('text-red-400');
+            } finally {
+                isProcessing = false;
+                sendBtn.disabled = false;
+                messageInput.focus();
+            }
+        });
+
+        // Clear chat
+        function clearChat() {
+            chatContainer.innerHTML = `
+                <div class="flex justify-start">
+                    <div class="bg-gray-700 rounded-2xl rounded-bl-md px-4 py-3 max-w-[80%]">
+                        <p class="text-gray-100">👋 Hello! I'm your EventHub AI assistant. How can I help you today?</p>
+                        <p class="text-gray-400 text-xs mt-2">I can help with reservations, refunds, event information, account issues, and more.</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Initialize on load
+        document.addEventListener('DOMContentLoaded', () => {
+            initUserContext();
+            messageInput.focus();
+        });
+    </script>
+</body>
+</html>

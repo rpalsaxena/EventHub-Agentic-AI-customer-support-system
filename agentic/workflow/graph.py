@@ -19,6 +19,9 @@ from .nodes import (
     route_from_resolver,
 )
 
+# Import ticket creation function
+from agentic.tools.db_tools import create_support_ticket
+
 
 # ============================================================================
 # WORKFLOW GRAPH
@@ -178,6 +181,42 @@ def run_ticket(
             "escalation_reason": result.get("escalation_reason"),
             "escalation_package": result.get("escalation_package"),
         }
+    
+    # ========== SAVE TICKET TO DATABASE ==========
+    # Map urgency to priority for database
+    urgency_to_priority = {
+        "low": "low",
+        "medium": "medium", 
+        "high": "high",
+        "critical": "critical"
+    }
+    priority = urgency_to_priority.get(result.get("urgency", "medium"), "medium")
+    
+    # Map final_status to ticket status
+    status = "resolved" if result.get("final_status") == "resolved" else "escalated"
+    
+    # Create agent notes with summary
+    agent_notes = f"AI Classification: {result.get('category')} | {result.get('urgency')} | {result.get('sentiment')}\n"
+    agent_notes += f"Summary: {result.get('summary', '')}\n"
+    agent_notes += f"RAG Confidence: {result.get('rag_confidence', 0.0):.1%}"
+    
+    # Save to database
+    try:
+        save_result = create_support_ticket(
+            ticket_id=ticket_id,
+            subject=subject,
+            description=description,
+            category=result.get("category", "general"),
+            priority=priority,
+            status=status,
+            user_email=user_email,
+            reservation_id=reservation_id,
+            agent_notes=agent_notes,
+        )
+        output["ticket_saved"] = save_result.get("success", False)
+    except Exception as e:
+        output["ticket_saved"] = False
+        output["ticket_save_error"] = str(e)
     
     return output
 

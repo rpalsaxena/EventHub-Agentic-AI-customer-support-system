@@ -15,7 +15,7 @@ from agentic.agents.escalation import EscalationAgent
 
 # Import tools
 from agentic.tools.rag_tools import search_knowledge_base
-from agentic.tools.db_tools import get_user_info, get_reservation_info
+from agentic.tools.db_tools import get_user_info, get_reservation_info, get_user_reservations, get_user_tickets
 
 
 # ============================================================================
@@ -93,10 +93,10 @@ def tool_calling_node(state: TicketState) -> Dict[str, Any]:
     Node 2: Fetch tool results based on category (CultPass pattern).
     
     Deterministic tool selection:
+    - off_topic: Return polite rejection, skip all tool calls
     - Always: Search knowledge base
-    - refund/cancellation/complaint: + user_info + reservation_info
-    - general: + user_info
-    - technical: KB only
+    - If user_email exists: Fetch user_info, user_reservations, user_tickets
+    - refund/cancellation/complaint: + specific reservation_info if ID provided
     
     Args:
         state: Current workflow state with classification
@@ -105,6 +105,22 @@ def tool_calling_node(state: TicketState) -> Dict[str, Any]:
         Updated state with tool_results and rag_confidence
     """
     tool_results = {}
+    category = state.get("category", "general")
+    
+    # ========== GUARDRAIL: Handle off-topic queries ==========
+    if category == "off_topic":
+        # Return early with polite rejection - no expensive tool calls
+        return {
+            "tool_results": {"off_topic": True},
+            "rag_confidence": 0.0,
+            "status": "resolved",
+            "response": (
+                "I'm EventHub's customer support assistant, and I specialize in helping with "
+                "event bookings, tickets, reservations, refunds, and account-related questions. "
+                "Unfortunately, I'm not able to help with questions outside of these topics. "
+                "Is there anything related to your EventHub experience I can assist you with?"
+            ),
+        }
     
     # Build query from ticket
     query = f"{state['subject']} {state['description']}"
@@ -125,34 +141,40 @@ def tool_calling_node(state: TicketState) -> Dict[str, Any]:
                 rag_confidence = first_result.get("relevance", 0.0)
     
     category = state.get("category", "general")
+    user_email = state.get("user_email")
     
-    # ========== Category-specific tools ==========
-    if category in ["refund", "cancellation", "complaint"]:
-        # Need user info and reservation info
-        if state.get("user_email"):
-            try:
-                user_info = get_user_info.invoke({"user_email": state["user_email"]})
-                tool_results["user_info"] = user_info
-            except Exception as e:
-                tool_results["user_info"] = {"error": str(e)}
+    # ========== If user email provided: Fetch ALL user context ==========
+    if user_email:
+        # Get user info
+        try:
+            user_info = get_user_info.invoke({"email": user_email})
+            tool_results["user_info"] = user_info
+        except Exception as e:
+            tool_results["user_info"] = {"error": str(e)}
         
+        # Get user's reservations (ALWAYS - so we can answer "what did I book?")
+        try:
+            user_reservations = get_user_reservations.invoke({"email": user_email, "limit": 10})
+            tool_results["user_reservations"] = user_reservations
+        except Exception as e:
+            tool_results["user_reservations"] = [{"error": str(e)}]
+        
+        # Get user's support tickets (for context on previous issues)
+        try:
+            user_tickets = get_user_tickets.invoke({"email": user_email, "limit": 5})
+            tool_results["user_support_tickets"] = user_tickets
+        except Exception as e:
+            tool_results["user_support_tickets"] = [{"error": str(e)}]
+    
+    # ========== Category-specific: Specific reservation lookup ==========
+    if category in ["refund", "cancellation", "complaint"]:
+        # If specific reservation ID provided, get detailed info
         if state.get("reservation_id"):
             try:
                 reservation_info = get_reservation_info.invoke({"reservation_id": state["reservation_id"]})
                 tool_results["reservation_info"] = reservation_info
             except Exception as e:
                 tool_results["reservation_info"] = {"error": str(e)}
-    
-    elif category == "general":
-        # General queries: user info for personalization
-        if state.get("user_email"):
-            try:
-                user_info = get_user_info.invoke({"user_email": state["user_email"]})
-                tool_results["user_info"] = user_info
-            except Exception as e:
-                tool_results["user_info"] = {"error": str(e)}
-    
-    # technical category: KB only (already done)
     
     return {
         "tool_results": tool_results,
@@ -175,6 +197,15 @@ def resolver_node(state: TicketState) -> Dict[str, Any]:
     Returns:
         Updated state with response, status, escalation_reason
     """
+    # If off_topic was handled in tool_calling_node, response is already set
+    if state.get("tool_results", {}).get("off_topic"):
+        return {
+            "response": state.get("response", "I can only help with EventHub-related questions."),
+            "status": "resolved",
+            "escalation_reason": "",
+            "rag_confidence": 0.0,
+        }
+    
     resolver = get_resolver()
     
     # Build ticket_data from state

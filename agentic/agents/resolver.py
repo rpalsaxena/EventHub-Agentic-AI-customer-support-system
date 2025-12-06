@@ -148,10 +148,32 @@ class TicketResolver:
             tool_context_parts.append(f"Status: {reservation_info.get('status', 'N/A')}")
             tool_context_parts.append(f"Total: ${reservation_info.get('total_price', 0):.2f}")
         
-        # User reservations
+        # User reservations - CRITICAL: This is what lets us answer "what did I book?"
         user_reservations = tool_results.get("user_reservations", [])
-        if user_reservations and isinstance(user_reservations, list):
-            tool_context_parts.append(f"\n**User has {len(user_reservations)} reservation(s)**")
+        if user_reservations and isinstance(user_reservations, list) and len(user_reservations) > 0:
+            # Check if first item is an error
+            if not (len(user_reservations) == 1 and "error" in user_reservations[0]):
+                tool_context_parts.append(f"\n**User's Reservations ({len(user_reservations)} total):**")
+                for i, res in enumerate(user_reservations[:5], 1):  # Show up to 5
+                    tool_context_parts.append(
+                        f"  {i}. {res.get('event_title', 'Unknown Event')} - "
+                        f"Date: {res.get('event_date_formatted', res.get('event_date', 'N/A'))}, "
+                        f"Status: {res.get('status', 'N/A')}, "
+                        f"Tickets: {res.get('ticket_count', 'N/A')}, "
+                        f"Total: ${res.get('total_price', 0):.2f}, "
+                        f"ID: {res.get('reservation_id', 'N/A')}"
+                    )
+        
+        # User support tickets - for context on previous issues
+        user_support_tickets = tool_results.get("user_support_tickets", [])
+        if user_support_tickets and isinstance(user_support_tickets, list) and len(user_support_tickets) > 0:
+            if not (len(user_support_tickets) == 1 and "error" in user_support_tickets[0]):
+                tool_context_parts.append(f"\n**User's Previous Support Tickets ({len(user_support_tickets)} total):**")
+                for i, ticket in enumerate(user_support_tickets[:3], 1):  # Show up to 3
+                    tool_context_parts.append(
+                        f"  {i}. [{ticket.get('category', 'general')}] {ticket.get('subject', 'N/A')} - "
+                        f"Status: {ticket.get('status', 'N/A')}"
+                    )
         
         tool_context = "\n".join(tool_context_parts) if tool_context_parts else "No additional account information available."
         
